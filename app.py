@@ -1,6 +1,11 @@
 import os
 from flask import Flask, request
-from github import Github, GithubIntegration
+from github import Github, GithubIntegration, UnknownObjectException
+
+'''
+Autores: Alexandre Scrocaro, Jessé Pires, Jhonatan Cunha e Matheus Patriarca.
+Código responsável por apresentar mensagens de agradecimentos quando o usuário faz um pull request, um merge e apagar a branch após o merge.
+'''
 
 app = Flask(__name__)
 
@@ -31,6 +36,34 @@ def pr_opened_event(repo, payload):
         pr.create_comment(f"{response}")
         pr.add_to_labels("needs review")
 
+'''
+ @params: repo: repositório a ser trabalhado, branch_name: nome da branch a ser excluída.
+ A branch que tem o nome passado por parâmetro é excluída.
+'''
+def delete_branch_after_accepted_pr(repo, branch_name):
+    try:
+        branch = repo.get_git_ref("heads/%s" % branch_name)
+        branch.delete()
+    except UnknownObjectException:
+        print('No such branch', branch_name)
+
+'''
+ @params: repo: repositório a ser trabalhado, payload: outros dados do github.
+ Após o processo de merge, é apresentado uma mensagem ao usuário e a branch que foi feita o merge é excluída.
+'''
+def pr_closed_event(repo, payload):
+    pr = repo.get_issue(number=payload['pull_request']['number'])
+    author = pr.user.login
+
+    if payload['pull_request']['merged']:
+        response = f"Thanks, {author}! Your merge is completed :sunglasses:!"
+        pr.create_comment(f"{response}")
+        pr.add_to_labels("Congratulation")
+
+        # Delete branch
+        branch_name = payload['pull_request']['head']['ref']
+        delete_branch_after_accepted_pr(repo, branch_name)
+
 @app.route("/", methods=['POST'])
 def bot():
     payload = request.json
@@ -51,6 +84,8 @@ def bot():
     # Check if the event is a GitHub pull request creation event
     if all(k in payload.keys() for k in ['action', 'pull_request']) and payload['action'] == 'opened':
         pr_opened_event(repo, payload)
+    elif all(k in payload.keys() for k in ['action', 'pull_request']) and payload['action'] == 'closed':     # Check if the event is a Github merge, and was accepted
+        pr_closed_event(repo, payload)
 
     return "", 204
 
